@@ -1,34 +1,20 @@
+import os
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from routers.room import router as room_router
 from routers.game import router as game_router
-<<<<<<< HEAD
 from dependencies import game_manager, ws_manager
-=======
-from dependencies import game_manager
-import os
->>>>>>> 3330243ce7168bca896bbef8bfa31dab31c0cd91
 
 app = FastAPI(
     title="Cabo Backend",
     version="1.0.0",
 )
 
-<<<<<<< HEAD
-import os
-
 ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"] if "*" in ALLOWED_ORIGINS else ALLOWED_ORIGINS,
-=======
-origins = os.getenv("ALLOWED_ORIGINS", "").split(",")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
->>>>>>> 3330243ce7168bca896bbef8bfa31dab31c0cd91
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
