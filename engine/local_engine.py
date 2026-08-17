@@ -72,6 +72,7 @@ class GameEngine:
         # Reveal all cards to everyone & calculate scores
         all_player_ids = [p.id for p in game.players]
         for player in game.players:
+            player.is_ready = False  # Reset readiness for next round
             hand = game.hands.get(player.id, [])
             round_pts = sum(GameEngine.card_value(card) for card in hand if card is not None)
             for card in hand:
@@ -104,6 +105,10 @@ class GameEngine:
         if len(game.players) < 2:
             raise ValueError("Need at least two players")
         
+        non_admins = [p for p in game.players if not p.is_admin]
+        if non_admins and not all(p.is_ready for p in non_admins):
+            raise ValueError("All players must be ready before starting")
+        
         if game.phase == "finished":
             game.round_number += 1
         else:
@@ -134,7 +139,7 @@ class GameEngine:
         game.discard_pile = []
         game.current_turn = _rng.randrange(len(game.players))
         game.phase = "peeking"
-        game.peek_end_time = time.time() + 8.0  # 3s countdown + 5s card memorization
+        game.peek_end_time = time.time() + 4.0  # Snappy 4s card memorization
         game.cabo_caller_index = None
 
     @staticmethod

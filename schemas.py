@@ -1,5 +1,5 @@
 from uuid import UUID
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 class CreateRoomRequest(BaseModel):
     name: str | None = None
@@ -11,7 +11,7 @@ class CreateRoomResponse(BaseModel):
 
 class JoinRoomRequest(BaseModel):
     room_id: str
-    player_name: str
+    player_name: str = Field(..., max_length=30)
 
 class JoinRoomResponse(BaseModel):
     player_id: UUID

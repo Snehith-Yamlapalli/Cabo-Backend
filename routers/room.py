@@ -26,23 +26,19 @@ async def join_room(req: JoinRoomRequest):
             status_code=404,
             detail=f"Room {req.room_id} has been closed or does not exist",
         )
-    if game.phase != "lobby":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Game in room {req.room_id} has already started",
-        )
     if len(game.players) >= game.max_players:
         raise HTTPException(
             status_code=400,
             detail=f"Room {req.room_id} is full",
         )
-    if any(p.name.strip().lower() == req.player_name.strip().lower() for p in game.players):
+    clean_name = req.player_name.strip()[:30]
+    if any(p.name.strip().lower() == clean_name.lower() for p in game.players):
         raise HTTPException(
             status_code=400,
-            detail=f"A player with the name '{req.player_name}' is already in this room",
+            detail=f"A player with the name '{clean_name}' is already in this room",
         )
 
-    player = Player(name=req.player_name)
+    player = Player(name=clean_name)
     success = game_manager.join_room(req.room_id, player)
     if not success:
         raise HTTPException(
@@ -83,8 +79,8 @@ async def toggle_ready(req: ReadyRoomRequest):
     game = game_manager.get_game(req.room_id)
     if game is None:
         raise HTTPException(status_code=404, detail="Room not found")
-    if game.phase != "lobby":
-        raise HTTPException(status_code=400, detail="Game already started")
+    if game.phase not in ("lobby", "finished"):
+        raise HTTPException(status_code=400, detail="Cannot toggle ready during active game")
 
     success = game_manager.toggle_ready(req.room_id, req.player_id, req.is_ready)
     if not success:

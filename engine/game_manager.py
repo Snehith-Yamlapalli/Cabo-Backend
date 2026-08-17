@@ -62,7 +62,7 @@ class GameManager:
         if game is None:
             return None
         game.last_activity = time.time()
-        self.cleanup_inactive(1800)
+        self.cleanup_inactive(600)
         # Clean up expired card reveals
         now = time.time()
         for hand in game.hands.values():
@@ -84,8 +84,6 @@ class GameManager:
         game = self.get_game(room_id)
         if game is None:
             return False
-        if game.phase != "lobby":
-            return False
         if len(game.players) >= game.max_players:
             return False
         # Reject duplicate player names (case-insensitive)
@@ -105,7 +103,7 @@ class GameManager:
         if game is None:
             return False
         for p in game.players:
-            if str(p.id) == str(player_id):
+            if str(p.id).lower() == str(player_id).lower():
                 if is_ready is not None:
                     p.is_ready = is_ready
                 else:
@@ -139,6 +137,20 @@ class GameManager:
         if leaving_player.is_admin and game.players:
             game.players[0].is_admin = True
 
+        # If only 1 player remains in an active game, return room to lobby
+        if len(game.players) == 1 and game.phase != "lobby":
+            game.phase = "lobby"
+            game.draw_pile = []
+            game.discard_pile = []
+            game.active_resolutions = []
+            game.turn.pending_action = "none"
+            game.turn.picked_card = None
+            for p in game.players:
+                game.hands[p.id] = []
+                p.score = 0
+                p.round_score = 0
+                p.is_ready = True if p.is_admin else False
+
         if not game.players:
             self.destroy_room(room_id)
         return True
@@ -156,8 +168,8 @@ class GameManager:
             return 0
         return len(game.players)
 
-    def cleanup_inactive(self, timeout_seconds: float = 1800):
-        """Remove rooms with no activity for timeout_seconds (default 30 min)."""
+    def cleanup_inactive(self, timeout_seconds: float = 600):
+        """Remove rooms with no activity for timeout_seconds (default 10 min)."""
         import time
         now = time.time()
         to_remove = [
