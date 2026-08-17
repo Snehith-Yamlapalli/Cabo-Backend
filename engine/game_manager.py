@@ -116,40 +116,24 @@ class GameManager:
         if game is None:
             return False
         leaving_player = None
-        leaving_index = -1
-        for i, player in enumerate(game.players):
-            if str(player.id) == str(player_id):
+        for player in game.players:
+            if str(player.id).lower() == str(player_id).lower():
                 leaving_player = player
-                leaving_index = i
                 break
         if leaving_player is None:
             return False
+
+        # During active round: mark as not ready so seat & hand remain fixed in table layout for round stability
+        if game.phase in ("peeking", "playing", "cabo_round"):
+            leaving_player.is_ready = False
+            return True
+
+        # In lobby or finished state: remove player from room
         game.players.remove(leaving_player)
         game.hands.pop(player_id, None)
         
-        # Adjust current_turn if needed (mid-game)
-        if game.phase not in ("lobby", "finished") and game.players:
-            if leaving_index < game.current_turn:
-                game.current_turn -= 1
-            if game.current_turn >= len(game.players):
-                game.current_turn = 0
-        
         if leaving_player.is_admin and game.players:
             game.players[0].is_admin = True
-
-        # If only 1 player remains in an active game, return room to lobby
-        if len(game.players) == 1 and game.phase != "lobby":
-            game.phase = "lobby"
-            game.draw_pile = []
-            game.discard_pile = []
-            game.active_resolutions = []
-            game.turn.pending_action = "none"
-            game.turn.picked_card = None
-            for p in game.players:
-                game.hands[p.id] = []
-                p.score = 0
-                p.round_score = 0
-                p.is_ready = True if p.is_admin else False
 
         if not game.players:
             self.destroy_room(room_id)

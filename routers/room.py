@@ -26,16 +26,22 @@ async def join_room(req: JoinRoomRequest):
             status_code=404,
             detail=f"Room {req.room_id} has been closed or does not exist",
         )
+
+    clean_name = req.player_name.strip()[:30]
+
+    # Re-connection check: if a player with this name already exists in the room, re-attach them to their previous data
+    existing_player = next((p for p in game.players if p.name.strip().lower() == clean_name.lower()), None)
+    if existing_player:
+        await ws_manager.broadcast(req.room_id, game.model_dump(mode="json"))
+        return JoinRoomResponse(
+            room_id=req.room_id,
+            player_id=existing_player.id,
+        )
+
     if len(game.players) >= game.max_players:
         raise HTTPException(
             status_code=400,
             detail=f"Room {req.room_id} is full",
-        )
-    clean_name = req.player_name.strip()[:30]
-    if any(p.name.strip().lower() == clean_name.lower() for p in game.players):
-        raise HTTPException(
-            status_code=400,
-            detail=f"A player with the name '{clean_name}' is already in this room",
         )
 
     player = Player(name=clean_name)
@@ -80,7 +86,11 @@ async def toggle_ready(req: ReadyRoomRequest):
     if game is None:
         raise HTTPException(status_code=404, detail="Room not found")
     if game.phase not in ("lobby", "finished"):
-        raise HTTPException(status_code=400, detail="Cannot toggle ready during active game")
+        # During an active round, only sitting-out players (with 0 cards) can toggle ready for next round
+        player_hand = game.hands.get(req.player_id, [])
+        valid_cards = [c for c in player_hand if c is not None]
+        if len(valid_cards) > 0:
+            raise HTTPException(status_code=400, detail="Active players cannot toggle ready during a round")
 
     success = game_manager.toggle_ready(req.room_id, req.player_id, req.is_ready)
     if not success:
