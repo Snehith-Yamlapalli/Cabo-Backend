@@ -27,7 +27,7 @@ async def join_room(req: JoinRoomRequest):
             detail=f"Room {req.room_id} has been closed or does not exist",
         )
 
-    clean_name = req.player_name.strip()[:30]
+    clean_name = req.player_name.strip()[:10]
 
     # Re-connection check: if a player with this name already exists in the room, re-attach them to their previous data
     existing_player = next((p for p in game.players if p.name.strip().lower() == clean_name.lower()), None)

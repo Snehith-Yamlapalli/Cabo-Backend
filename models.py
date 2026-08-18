@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 class Player(BaseModel):
     id: UUID = Field(default_factory=uuid4)
-    name: str = Field(..., max_length=30)
+    name: str = Field(..., max_length=10)
     score: int = 0
     round_score: int = 0
     is_admin: bool = False

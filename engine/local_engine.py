@@ -139,7 +139,7 @@ class GameEngine:
         game.discard_pile = []
         game.current_turn = _rng.randrange(len(game.players))
         game.phase = "peeking"
-        game.peek_end_time = time.time() + 4.0  # Snappy 4s card memorization
+        game.peek_end_time = time.time() + 8.0  # 8s card memorization at round start
         game.cabo_caller_index = None
 
     @staticmethod
@@ -195,6 +195,36 @@ class GameEngine:
         game.turn.pending_action = "discard"
         return card
 
+    @staticmethod
+    def get_cabo_caller_id(game: LocalGame) -> UUID | None:
+        for p in game.players:
+            if p.called_cabo:
+                return p.id
+        if game.cabo_caller_index is not None and 0 <= game.cabo_caller_index < len(game.players):
+            return game.players[game.cabo_caller_index].id
+        return None
+
+    @staticmethod
+    def has_valid_power_targets(game: LocalGame, rank: str, player_id: UUID) -> bool:
+        cabo_caller_id = GameEngine.get_cabo_caller_id(game)
+        
+        own_hand = game.hands.get(player_id, [])
+        valid_own_cards = [c for c in own_hand if c is not None]
+        
+        non_cabo_opponent_cards = []
+        for p in game.players:
+            if p.id != player_id and p.id != cabo_caller_id:
+                hand = game.hands.get(p.id, [])
+                non_cabo_opponent_cards.extend([c for c in hand if c is not None])
+                
+        if rank in ("7", "8"):
+            return len(valid_own_cards) > 0
+        elif rank in ("9", "10", "Q", "J"):
+            return len(non_cabo_opponent_cards) > 0
+        elif rank == "K":
+            return len(valid_own_cards) > 0
+        return True
+
     # Discard
     
     @staticmethod
@@ -211,6 +241,13 @@ class GameEngine:
         
         if drawn_from == "deck":
             rank = card.rank
+            curr_player = GameEngine.current_player(game)
+            if rank in ("7", "8", "9", "10", "J", "Q", "K"):
+                if not GameEngine.has_valid_power_targets(game, rank, curr_player.id):
+                    game.last_action_log = f"{curr_player.name} played {rank}, but no valid target cards are available. Power skipped!"
+                    GameEngine.next_turn(game)
+                    return
+
             if rank in ("7", "8"):
                 game.turn.pending_action = "look_self"
                 return
@@ -280,6 +317,10 @@ class GameEngine:
                 
         if not target_card:
             raise ValueError("Card not found in any hand")
+
+        cabo_caller_id = GameEngine.get_cabo_caller_id(game)
+        if cabo_caller_id and owner_id == cabo_caller_id and player_id != cabo_caller_id:
+            raise ValueError("Cannot play sticky on cards of the player who called CABO! Their cards are frozen.")
             
         # Get player names
         player_name = next((p.name for p in game.players if p.id == player_id), "Player")
@@ -378,16 +419,22 @@ class GameEngine:
             raise ValueError("No look power active")
             
         target_card = None
+        target_owner_id = None
         for p_id, p_hand in game.hands.items():
             for card in p_hand:
                 if card and card.id == target_card_id:
                     target_card = card
+                    target_owner_id = p_id
                     break
             if target_card:
                 break
                 
         if not target_card:
             raise ValueError("Target card not found")
+
+        cabo_caller_id = GameEngine.get_cabo_caller_id(game)
+        if cabo_caller_id and target_owner_id == cabo_caller_id and player_id != cabo_caller_id:
+            raise ValueError("Cannot peek at cards of the player who called CABO! Their cards are frozen.")
 
         # For look_other (9/10), ensure the target is NOT the player's own card
         if pa == "look_other":
@@ -449,11 +496,16 @@ class GameEngine:
             if card2:
                 break
                 
+        cabo_caller_id = GameEngine.get_cabo_caller_id(game)
+
         if not card1 or not card2:
             raise ValueError("Cards not found")
             
         if p1_id == p2_id:
             raise ValueError("Must swap cards between two different players")
+
+        if cabo_caller_id and (p1_id == cabo_caller_id or p2_id == cabo_caller_id) and player_id != cabo_caller_id:
+            raise ValueError("Cannot swap cards with the player who called CABO! Their cards are frozen.")
             
         # Swap
         hand1[idx1] = card2

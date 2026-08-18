@@ -11,7 +11,7 @@ class CreateRoomResponse(BaseModel):
 
 class JoinRoomRequest(BaseModel):
     room_id: str
-    player_name: str = Field(..., max_length=30)
+    player_name: str = Field(..., max_length=10)
 
 class JoinRoomResponse(BaseModel):
     player_id: UUID
