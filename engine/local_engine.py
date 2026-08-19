@@ -218,6 +218,7 @@ class GameEngine:
         game.turn.picked_card = card
         game.turn.drawn_from = "deck"
         game.turn.pending_action = "discard"
+        game.turn.turn_start_time = time.time()
         game.round_had_manual_action = True
         return card
 
@@ -231,6 +232,8 @@ class GameEngine:
         game.turn.picked_card = card
         game.turn.drawn_from = "discard"
         game.turn.pending_action = "discard"
+        game.turn.turn_start_time = time.time()
+        game.round_had_manual_action = True
         return card
 
     @staticmethod
@@ -654,13 +657,13 @@ class GameEngine:
                 GameEngine.next_turn(game)
                 return True
 
-        # 2. Card Discard Timeout (8 seconds after drawing card)
-        if pa == "discard" and game.turn.drawn_from == "deck":
-            turn_start = game.turn.action_start_time or game.turn.turn_start_time or now
+        # 2. Card Discard Timeout (8 seconds after drawing card from deck or discard)
+        if pa == "discard":
+            turn_start = game.turn.turn_start_time
             if now - turn_start >= 8.0:
                 try:
                     GameEngine.discard_picked(game)
-                    game.last_action_log = f"{curr_player.name} ran out of 8s turn time! Auto-discarded card."
+                    game.last_action_log = f"{curr_player.name} ran out of 8s action time! Auto-discarded card."
                     GameEngine.next_turn(game)
                 except Exception:
                     GameEngine.next_turn(game)
