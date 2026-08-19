@@ -29,14 +29,25 @@ async def join_room(req: JoinRoomRequest):
 
     clean_name = req.player_name.strip()[:10]
 
-    # Re-connection check: if a player with this name already exists in the room, re-attach them to their previous data
-    existing_player = next((p for p in game.players if p.name.strip().lower() == clean_name.lower()), None)
+    # Re-connection check: if a player with this name (case-insensitive) already exists in the room
+    existing_player = next((p for p in game.players if p.name.strip().casefold() == clean_name.casefold()), None)
     if existing_player:
-        await ws_manager.broadcast(req.room_id, game.model_dump(mode="json"))
-        return JoinRoomResponse(
-            room_id=req.room_id,
-            player_id=existing_player.id,
-        )
+        # Check if the player is currently active and connected in the room
+        is_active = not getattr(existing_player, "has_left", False) and getattr(existing_player, "is_connected", True) is not False
+        if is_active:
+            raise HTTPException(
+                status_code=400,
+                detail=f"A player named '{clean_name}' is already in this room. Please choose a different name.",
+            )
+        else:
+            # Re-attach disconnected player
+            existing_player.has_left = False
+            existing_player.is_connected = True
+            await ws_manager.broadcast(req.room_id, game.model_dump(mode="json"))
+            return JoinRoomResponse(
+                room_id=req.room_id,
+                player_id=existing_player.id,
+            )
 
     if len(game.players) >= game.max_players:
         raise HTTPException(

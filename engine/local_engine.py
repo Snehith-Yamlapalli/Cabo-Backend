@@ -653,7 +653,7 @@ class GameEngine:
         if pa == "draw":
             turn_start = game.turn.turn_start_time
             if now - turn_start >= 8.0:
-                game.last_action_log = f"{curr_player.name} ran out of 8s turn time! Turn skipped."
+                game.last_action_log = f"{curr_player.name} turned skipped due to timeout"
                 GameEngine.next_turn(game)
                 return True
 
