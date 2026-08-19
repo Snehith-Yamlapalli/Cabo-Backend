@@ -84,6 +84,36 @@ class ConnectionManager:
                     delay = max(0.1, card.reveal_end_time - now)
                     self.schedule_broadcast(room_id, delay, f"reveal:{card.id}")
 
+        # Turn inactivity and power action timeout checker
+        if game.phase in ("playing", "cabo_round"):
+            if not game.turn.turn_start_time:
+                game.turn.turn_start_time = now
+
+            key = f"{room_id}:turn_timeout"
+            task = self._scheduled_tasks.get(key)
+            if task is None or task.done():
+                async def _check_timeout():
+                    try:
+                        while True:
+                            await asyncio.sleep(0.5)
+                            from dependencies import game_manager
+                            from engine.local_engine import GameEngine
+                            g = game_manager.get_game(room_id)
+                            if not g or g.phase not in ("playing", "cabo_round"):
+                                break
+                            changed = GameEngine.handle_turn_timeout(g)
+                            if changed:
+                                await self.broadcast(room_id, g.model_dump(mode="json"))
+                                game_manager.save()
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception:
+                        pass
+                    finally:
+                        self._scheduled_tasks.pop(key, None)
+
+                self._scheduled_tasks[key] = asyncio.create_task(_check_timeout())
+
     def cancel_room_tasks(self, room_id: str):
         """Cancel all scheduled tasks for a room."""
         to_remove = [k for k in self._scheduled_tasks if k.startswith(room_id)]

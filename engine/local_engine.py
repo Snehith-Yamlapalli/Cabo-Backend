@@ -16,24 +16,42 @@ class GameEngine:
 
     @staticmethod
     def next_turn(game: LocalGame):
+        if not game.players:
+            return
+
         # If the deck has run out of cards, finish the round immediately & reveal all cards!
         if len(game.draw_pile) == 0 and game.phase in ("playing", "cabo_round"):
             GameEngine.finish_game(game)
             game.last_action_log = "The deck has run out of cards! Round ended and all cards revealed!"
             return
 
-        next_turn_index = (game.current_turn + 1) % len(game.players)
-        
-        # If in cabo round and we loop back to the player who called Cabo, game finishes!
-        if game.phase == "cabo_round" and next_turn_index == game.cabo_caller_index:
+        # Count active, connected players who haven't left
+        active_players = [p for p in game.players if getattr(p, "is_connected", True) and not getattr(p, "has_left", False)]
+        if len(active_players) <= 1 and game.phase in ("playing", "cabo_round"):
             GameEngine.finish_game(game)
+            game.last_action_log = "All opponents left the game! Match finished!"
             return
 
-        game.current_turn = next_turn_index
+        # Find next active player (skipping disconnected / left players)
+        for _ in range(len(game.players)):
+            next_turn_index = (game.current_turn + 1) % len(game.players)
+            game.current_turn = next_turn_index
+            
+            # If in cabo round and we loop back to the player who called Cabo, game finishes!
+            if game.phase == "cabo_round" and next_turn_index == game.cabo_caller_index:
+                GameEngine.finish_game(game)
+                return
+
+            curr_player = game.players[game.current_turn]
+            if getattr(curr_player, "is_connected", True) and not getattr(curr_player, "has_left", False):
+                break
+
         game.turn.picked_card = None
         game.turn.first_swap_target = None
         game.turn.pending_action = "draw"
         game.turn.power_used = False
+        game.turn.turn_start_time = time.time()
+        game.turn.action_start_time = None
 
         # If the player whose turn it just became has 0 cards left:
         curr_player = game.players[game.current_turn]
@@ -82,6 +100,18 @@ class GameEngine:
             player.score += round_pts
             game.scores[player.id] = player.score
 
+        # Check consecutive inactive rounds (0 manual player actions in the entire round)
+        if not getattr(game, "round_had_manual_action", False):
+            game.consecutive_inactive_rounds = getattr(game, "consecutive_inactive_rounds", 0) + 1
+        else:
+            game.consecutive_inactive_rounds = 0
+
+        if game.consecutive_inactive_rounds >= 5:
+            game.phase = "lobby"
+            game.consecutive_inactive_rounds = 0
+            game.round_had_manual_action = False
+            game.last_action_log = "Match returned to Lobby after 5 consecutive inactive rounds!"
+
     # Deck
     
     @staticmethod
@@ -102,6 +132,9 @@ class GameEngine:
     # Start Game (or Next Round)
     @staticmethod
     def start(game: LocalGame):
+        # Purge players who left during previous round
+        game.players = [p for p in game.players if getattr(p, "is_connected", True) and not getattr(p, "has_left", False)]
+
         if len(game.players) < 2:
             raise ValueError("Need at least two players")
         
@@ -121,8 +154,12 @@ class GameEngine:
             player.called_cabo = False
 
         game.turn.picked_card = None
+        game.turn.first_swap_target = None
         game.turn.pending_action = "draw"
         game.turn.power_used = False
+        game.turn.turn_start_time = time.time()
+        game.turn.action_start_time = None
+        game.round_had_manual_action = False
 
         game.draw_pile = GameEngine.new_deck()
         GameEngine.shuffle(game)
@@ -181,6 +218,7 @@ class GameEngine:
         game.turn.picked_card = card
         game.turn.drawn_from = "deck"
         game.turn.pending_action = "discard"
+        game.round_had_manual_action = True
         return card
 
     @staticmethod
@@ -247,6 +285,9 @@ class GameEngine:
                     game.last_action_log = f"{curr_player.name} played {rank}, but no valid target cards are available. Power skipped!"
                     GameEngine.next_turn(game)
                     return
+
+            if rank in ("7", "8", "9", "10", "J", "Q", "K"):
+                game.turn.action_start_time = time.time()
 
             if rank in ("7", "8"):
                 game.turn.pending_action = "look_self"
@@ -585,6 +626,87 @@ class GameEngine:
         caller_player.called_cabo = True
         game.cabo_caller_index = game.current_turn
         game.phase = "cabo_round"
+        game.round_had_manual_action = True
 
         # Advance turn so other players get their 1 final turn
         GameEngine.next_turn(game)
+
+    @staticmethod
+    def handle_turn_timeout(game: LocalGame) -> bool:
+        """Checks if the turn or power action has timed out and executes auto-actions."""
+        if game.phase not in ("playing", "cabo_round"):
+            return False
+
+        now = time.time()
+        if not game.turn.turn_start_time:
+            game.turn.turn_start_time = now
+
+        pa = game.turn.pending_action
+        curr_player = GameEngine.current_player(game)
+        if not curr_player:
+            return False
+
+        # 1. Turn Inactivity Timeout (8 seconds to draw / start turn)
+        if pa == "draw":
+            turn_start = game.turn.turn_start_time
+            if now - turn_start >= 8.0:
+                game.last_action_log = f"{curr_player.name} ran out of 8s turn time! Turn skipped."
+                GameEngine.next_turn(game)
+                return True
+
+        # 2. Card Discard Timeout (8 seconds after drawing card)
+        if pa == "discard" and game.turn.drawn_from == "deck":
+            turn_start = game.turn.action_start_time or game.turn.turn_start_time or now
+            if now - turn_start >= 8.0:
+                try:
+                    GameEngine.discard_picked(game)
+                    game.last_action_log = f"{curr_player.name} ran out of 8s turn time! Auto-discarded card."
+                    GameEngine.next_turn(game)
+                except Exception:
+                    GameEngine.next_turn(game)
+                return True
+
+        # 3. Power Action Timeout (10 seconds)
+        if pa in ("look_self", "look_other", "blind_swap", "look_and_swap", "discard_self"):
+            action_start = game.turn.action_start_time or game.turn.turn_start_time or now
+            if now - action_start >= 10.0:
+                # 7, 8, 9, 10: Auto-skip at 10 seconds
+                if pa in ("look_self", "look_other"):
+                    game.last_action_log = f"{curr_player.name} took too long (10s)! Power ({pa}) skipped."
+                    GameEngine.next_turn(game)
+                    return True
+
+                # K: Discard self power expired (his loss)
+                elif pa == "discard_self":
+                    game.last_action_log = f"{curr_player.name} took too long (10s)! King trash power expired."
+                    GameEngine.next_turn(game)
+                    return True
+
+                # J & Q: Swap 1st available cards of player & opponent!
+                elif pa in ("blind_swap", "look_and_swap"):
+                    cabo_caller_id = GameEngine.get_cabo_caller_id(game)
+                    my_hand = game.hands.get(curr_player.id, [])
+                    my_valid = [c for c in my_hand if c is not None]
+
+                    opp_valid = []
+                    for p in game.players:
+                        if p.id != curr_player.id and p.id != cabo_caller_id:
+                            hand = game.hands.get(p.id, [])
+                            cards = [c for c in hand if c is not None]
+                            if cards:
+                                opp_valid.extend(cards)
+
+                    if my_valid and opp_valid:
+                        c1 = game.turn.first_swap_target or my_valid[0].id
+                        c2 = opp_valid[0].id
+                        try:
+                            GameEngine.power_swap(game, curr_player.id, c1, c2)
+                            game.last_action_log = f"{curr_player.name} took too long (10s)! Auto-swapped 1st available cards."
+                        except Exception:
+                            GameEngine.next_turn(game)
+                    else:
+                        game.last_action_log = f"{curr_player.name} took too long (10s)! Power skipped."
+                        GameEngine.next_turn(game)
+                    return True
+
+        return False

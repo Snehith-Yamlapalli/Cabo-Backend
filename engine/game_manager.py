@@ -123,9 +123,30 @@ class GameManager:
         if leaving_player is None:
             return False
 
-        # During active round: mark as not ready so seat & hand remain fixed in table layout for round stability
+        # During active round: mark as left and auto-advance turn if it was their turn!
         if game.phase in ("peeking", "playing", "cabo_round"):
             leaving_player.is_ready = False
+            leaving_player.has_left = True
+            leaving_player.is_connected = False
+
+            from engine.local_engine import GameEngine
+            is_current_turn = False
+            if 0 <= game.current_turn < len(game.players):
+                is_current_turn = game.players[game.current_turn].id == leaving_player.id
+
+            if is_current_turn:
+                game.last_action_log = f"{leaving_player.name} left the game. Turn skipped!"
+                GameEngine.next_turn(game)
+            else:
+                game.last_action_log = f"{leaving_player.name} left the game."
+
+            # Check if active player count dropped to 1
+            active_players = [p for p in game.players if getattr(p, "is_connected", True) and not getattr(p, "has_left", False)]
+            if len(active_players) <= 1 and game.phase in ("playing", "cabo_round"):
+                GameEngine.finish_game(game)
+                game.last_action_log = "All opponents left the game! Match finished!"
+
+            self.save()
             return True
 
         # In lobby or finished state: remove player from room
@@ -137,6 +158,8 @@ class GameManager:
 
         if not game.players:
             self.destroy_room(room_id)
+        else:
+            self.save()
         return True
 
     # -------------------------------------------------------
@@ -163,3 +186,5 @@ class GameManager:
         for room_id in to_remove:
             print(f"Cleaning up inactive room {room_id}")
             del self.games.games[room_id]
+        if to_remove:
+            self.save()

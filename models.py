@@ -11,6 +11,8 @@ class Player(BaseModel):
     is_admin: bool = False
     is_ready: bool = False
     called_cabo: bool = False
+    is_connected: bool = True
+    has_left: bool = False
 
 Rank = Literal[
     "A",
@@ -65,6 +67,8 @@ class TurnState(BaseModel):
     first_swap_target: UUID | None = None
     pending_action: PendingAction = "draw"
     power_used: bool = False
+    turn_start_time: float | None = None
+    action_start_time: float | None = None
 
 class StickyResolution(BaseModel):
     giver_id: UUID
@@ -96,6 +100,8 @@ class LocalGame(BaseModel):
     scores: Dict[UUID, int] = Field(default_factory=dict)
     last_action_log: str | None = None
     last_activity: float = Field(default_factory=lambda: __import__('time').time())
+    consecutive_inactive_rounds: int = 0
+    round_had_manual_action: bool = False
 
 
 class GlobalGame(BaseModel):
