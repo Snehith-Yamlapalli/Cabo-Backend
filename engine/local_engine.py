@@ -93,9 +93,6 @@ class GameEngine:
             player.is_ready = False  # Reset readiness for next round
             hand = game.hands.get(player.id, [])
             round_pts = sum(GameEngine.card_value(card) for card in hand if card is not None)
-            for card in hand:
-                if card is not None:
-                    card.visible_to = list(all_player_ids)
             player.round_score = round_pts
             player.score += round_pts
             game.scores[player.id] = player.score
@@ -189,6 +186,8 @@ class GameEngine:
                     card.visible_to.clear()
         game.phase = "playing"
         game.peek_end_time = None
+        game.turn.turn_start_time = time.time()
+        game.turn.action_start_time = None
 
         # Check if starting player has 0 cards
         curr_player = game.players[game.current_turn]
@@ -329,7 +328,7 @@ class GameEngine:
 
     @staticmethod
     def sticky(game: LocalGame, player_id: UUID, card_id: UUID):
-        if game.phase not in ("playing", "cabo_round"):
+        if game.phase not in ("playing", "cabo_round", "finished"):
             raise ValueError("Game is not active")
         
         if not game.discard_pile:
@@ -363,8 +362,8 @@ class GameEngine:
             raise ValueError("Card not found in any hand")
 
         cabo_caller_id = GameEngine.get_cabo_caller_id(game)
-        if cabo_caller_id and owner_id == cabo_caller_id and player_id != cabo_caller_id:
-            raise ValueError("Cannot play sticky on cards of the player who called CABO! Their cards are frozen.")
+        if cabo_caller_id and owner_id == cabo_caller_id:
+            raise ValueError("Cards of the player who called CABO are frozen and cannot be touched by anyone!")
             
         # Get player names
         player_name = next((p.name for p in game.players if p.id == player_id), "Player")
@@ -408,6 +407,11 @@ class GameEngine:
                     initiator_hand.append(penalty_card)
             else:
                 pass # Can't draw penalty if deck is completely empty
+
+        if game.phase == "finished":
+            for player in game.players:
+                hand = game.hands.get(player.id, [])
+                player.round_score = sum(GameEngine.card_value(card) for card in hand if card is not None)
 
     @staticmethod
     def give_card(game: LocalGame, player_id: UUID, card_id: UUID):
@@ -477,8 +481,8 @@ class GameEngine:
             raise ValueError("Target card not found")
 
         cabo_caller_id = GameEngine.get_cabo_caller_id(game)
-        if cabo_caller_id and target_owner_id == cabo_caller_id and player_id != cabo_caller_id:
-            raise ValueError("Cannot peek at cards of the player who called CABO! Their cards are frozen.")
+        if cabo_caller_id and target_owner_id == cabo_caller_id:
+            raise ValueError("Cards of the player who called CABO are frozen and cannot be touched by anyone!")
 
         # For look_other (9/10), ensure the target is NOT the player's own card
         if pa == "look_other":
@@ -548,8 +552,8 @@ class GameEngine:
         if p1_id == p2_id:
             raise ValueError("Must swap cards between two different players")
 
-        if cabo_caller_id and (p1_id == cabo_caller_id or p2_id == cabo_caller_id) and player_id != cabo_caller_id:
-            raise ValueError("Cannot swap cards with the player who called CABO! Their cards are frozen.")
+        if cabo_caller_id and (p1_id == cabo_caller_id or p2_id == cabo_caller_id):
+            raise ValueError("Cards of the player who called CABO are frozen and cannot be touched by anyone!")
             
         # Swap
         hand1[idx1] = card2
