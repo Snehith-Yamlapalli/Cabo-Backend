@@ -32,6 +32,18 @@ class GameEngine:
             game.last_action_log = "All opponents left the game! Match finished!"
             return
 
+        # Check if any player has 0 cards left to auto-trigger Cabo
+        if game.cabo_caller_index is None and game.phase == "playing":
+            for idx, p in enumerate(game.players):
+                hand = game.hands.get(p.id, [])
+                valid = [c for c in hand if c is not None]
+                if len(valid) == 0:
+                    p.called_cabo = True
+                    game.cabo_caller_index = idx
+                    game.phase = "cabo_round"
+                    game.last_action_log = f"{p.name} has 0 cards left! Cabo was automatically called!"
+                    break
+
         # Find next active player (skipping disconnected / left players)
         for _ in range(len(game.players)):
             next_turn_index = (game.current_turn + 1) % len(game.players)
@@ -53,7 +65,7 @@ class GameEngine:
         game.turn.turn_start_time = time.time()
         game.turn.action_start_time = None
 
-        # If the player whose turn it just became has 0 cards left:
+        # If the player whose turn it just became has 0 cards left during cabo round:
         curr_player = game.players[game.current_turn]
         curr_hand = game.hands.get(curr_player.id, [])
         valid_cards = [c for c in curr_hand if c is not None]
@@ -136,7 +148,7 @@ class GameEngine:
             raise ValueError("Need at least two players")
         
         non_admins = [p for p in game.players if not p.is_admin]
-        if non_admins and not all(p.is_ready for p in non_admins):
+        if game.phase != "finished" and non_admins and not all(p.is_ready for p in non_admins):
             raise ValueError("All players must be ready before starting")
         
         if game.phase == "finished":
@@ -323,6 +335,7 @@ class GameEngine:
                 game.discard_pile.append(card)
                 game.last_discard_was_sticky = False
                 game.turn.picked_card = None
+                GameEngine.next_turn(game)
                 return
         raise ValueError("Card not found")
 
