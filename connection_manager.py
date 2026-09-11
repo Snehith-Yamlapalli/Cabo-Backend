@@ -84,10 +84,10 @@ class ConnectionManager:
                     delay = max(0.1, card.reveal_end_time - now)
                     self.schedule_broadcast(room_id, delay, f"reveal:{card.id}")
 
-        # Turn inactivity and power action timeout checker
-        if game.phase in ("playing", "cabo_round"):
-            if not game.turn.turn_start_time:
-                game.turn.turn_start_time = now
+        # Turn inactivity and power action timeout checker.
+        # Started during "peeking" too, so the loop is already running the moment
+        # play begins and end_peeking() is reached by the loop itself.
+        if game.phase in ("peeking", "playing", "cabo_round"):
 
             key = f"{room_id}:turn_timeout"
             task = self._scheduled_tasks.get(key)
@@ -98,8 +98,14 @@ class ConnectionManager:
                             await asyncio.sleep(0.5)
                             from dependencies import game_manager
                             from engine.local_engine import GameEngine
+                            # get_game() ends an expired peek phase, so play is
+                            # already live here on the tick peeking runs out.
                             g = game_manager.get_game(room_id)
-                            if not g or g.phase not in ("playing", "cabo_round"):
+                            if not g:
+                                break
+                            if g.phase == "peeking":
+                                continue
+                            if g.phase not in ("playing", "cabo_round"):
                                 break
                             changed = GameEngine.handle_turn_timeout(g)
                             if changed:

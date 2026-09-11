@@ -166,7 +166,9 @@ class GameEngine:
         game.turn.first_swap_target = None
         game.turn.pending_action = "draw"
         game.turn.power_used = False
-        game.turn.turn_start_time = time.time()
+        # Turn clock stays unset during "peeking" — it starts in end_peeking(),
+        # otherwise the 8s peek window eats the first player's 8s turn.
+        game.turn.turn_start_time = None
         game.turn.action_start_time = None
         game.round_had_manual_action = False
 
@@ -658,8 +660,11 @@ class GameEngine:
             return False
 
         now = time.time()
+        # A turn clock that was never started (e.g. play just began after the
+        # peek phase) starts now — never treat it as already expired.
         if not game.turn.turn_start_time:
             game.turn.turn_start_time = now
+            return False
 
         pa = game.turn.pending_action
         curr_player = GameEngine.current_player(game)
