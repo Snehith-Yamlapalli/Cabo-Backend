@@ -96,6 +96,9 @@ async def end_turn(req: EndTurnRequest):
     if game is None:
         raise HTTPException(status_code=404, detail="Room not found")
     try:
+        curr_player = GameEngine.current_player(game)
+        if str(curr_player.id).lower() != str(req.player_id).lower():
+            raise ValueError("Not your turn")
         if game.turn.pending_action == "blind_swap" and game.turn.first_swap_target:
             raise ValueError("Must select second card to complete the swap!")
         GameEngine.next_turn(game)

@@ -32,16 +32,25 @@ class GameEngine:
             game.last_action_log = "All opponents left the game! Match finished!"
             return
 
-        # Check if any player has 0 cards left to auto-trigger Cabo
+        # Check if any player has 0 cards left to auto-trigger Cabo or Final Round
         if game.cabo_caller_index is None and game.phase == "playing":
             for idx, p in enumerate(game.players):
                 hand = game.hands.get(p.id, [])
                 valid = [c for c in hand if c is not None]
                 if len(valid) == 0:
-                    p.called_cabo = True
-                    game.cabo_caller_index = idx
-                    game.phase = "cabo_round"
-                    game.last_action_log = f"{p.name} has 0 cards left! Cabo was automatically called!"
+                    if idx == game.current_turn:
+                        # Player discarded all cards on their own turn → auto-call Cabo
+                        p.called_cabo = True
+                        game.cabo_caller_index = idx
+                        game.phase = "cabo_round"
+                        game.last_action_log = f"{p.name} has 0 cards left! Cabo was automatically called!"
+                    else:
+                        # Player lost all cards during another player's turn (e.g. sticky)
+                        # Set cabo_caller_index to CURRENT turn player so they become the
+                        # last to play and the game doesn't finish prematurely.
+                        game.cabo_caller_index = game.current_turn
+                        game.phase = "cabo_round"
+                        game.last_action_log = f"{p.name} discarded all cards! Final Round in Progress!"
                     break
 
         # Find next active player (skipping disconnected / left players)
@@ -320,6 +329,10 @@ class GameEngine:
             elif rank == "K":
                 game.turn.pending_action = "discard_self"
                 return
+
+        # Non-power card from deck (A-6) or any card drawn from discard pile:
+        # no power to activate, so advance the turn.
+        GameEngine.next_turn(game)
 
     # Swap
     
@@ -686,7 +699,7 @@ class GameEngine:
                 try:
                     GameEngine.discard_picked(game)
                     game.last_action_log = f"{curr_player.name} ran out of 8s action time! Auto-discarded card."
-                    GameEngine.next_turn(game)
+                    # discard_picked already calls next_turn() for non-power cards
                 except Exception:
                     GameEngine.next_turn(game)
                 return True

@@ -96,24 +96,31 @@ class ConnectionManager:
                     try:
                         while True:
                             await asyncio.sleep(0.5)
-                            from dependencies import game_manager
-                            from engine.local_engine import GameEngine
-                            # get_game() ends an expired peek phase, so play is
-                            # already live here on the tick peeking runs out.
-                            g = game_manager.get_game(room_id)
-                            if not g:
-                                break
-                            if g.phase == "peeking":
+                            # A single bad tick must NEVER kill the whole loop —
+                            # otherwise the player whose turn it just became would
+                            # never time out again (infinite turn). Swallow per-tick
+                            # errors and keep ticking.
+                            try:
+                                from dependencies import game_manager
+                                from engine.local_engine import GameEngine
+                                # get_game() ends an expired peek phase, so play is
+                                # already live here on the tick peeking runs out.
+                                g = game_manager.get_game(room_id)
+                                if not g:
+                                    break
+                                if g.phase == "peeking":
+                                    continue
+                                if g.phase not in ("playing", "cabo_round"):
+                                    break
+                                changed = GameEngine.handle_turn_timeout(g)
+                                if changed:
+                                    await self.broadcast(room_id, g.model_dump(mode="json"))
+                                    game_manager.save()
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception:
                                 continue
-                            if g.phase not in ("playing", "cabo_round"):
-                                break
-                            changed = GameEngine.handle_turn_timeout(g)
-                            if changed:
-                                await self.broadcast(room_id, g.model_dump(mode="json"))
-                                game_manager.save()
                     except asyncio.CancelledError:
-                        pass
-                    except Exception:
                         pass
                     finally:
                         self._scheduled_tasks.pop(key, None)
